@@ -1,0 +1,206 @@
+#! /usr/bin/env python3
+""" Interactive C """
+
+import sys
+import os
+import argparse
+import tempfile
+import readline
+import functools
+
+NAME = "@name@"
+VERSION = "@version@"
+
+DESCRIPTION = ''
+
+VERSION_DIALOG = ("{} - BreadyX's utils (BXU). Version {}\n"
+                  "Written by BreadyX, contacts (for bug reports and other):\n"
+                  "\tGitHub repo (BXU):  https://github.com/BreadyX/bxu")
+
+PROMPT_STD = '>> '
+PROMPT_MOD = '*> '
+
+FILE = 0
+CURRENT_FUNC = 1
+HEADERS = 2
+MACROS = 3
+GLOBALS = 4
+FUNCTIONS = 5
+
+class ProgramExit(Exception):
+    """Exception that signals a #quit command"""
+
+class EditString:
+    """(Static) Handle inline string editing"""
+    _edit_str = ''
+
+    @classmethod
+    def has_edit_str(cls):
+        """Return True if has edit string, else false"""
+        return bool(cls._edit_str)
+
+    @classmethod
+    def set_edit_str(cls, edit_string):
+        """Sets the string that will be edited by the user to `edit_string`"""
+        def pre_input_hook():
+            readline.insert_text(cls._edit_str)
+            readline.redisplay()
+
+        cls._edit_str = edit_string
+        readline.set_pre_input_hook(pre_input_hook)
+
+    @classmethod
+    def clear_edit_str(cls):
+        """Clear the edit string"""
+        cls.set_edit_str('')
+        cls._edit_str = ''
+
+def main():
+    """Main function"""
+    argv = handle_argv()
+    file = argv.file
+    if argv.version:
+        print(VERSION_DIALOG.format(NAME, VERSION))
+        sys.exit(0)
+    workspace = init_workspace(file)
+    main_loop(workspace)
+
+def handle_argv():
+    """Set up ArgumentParser and return the namespace obtained after parsing"""
+    parser = argparse.ArgumentParser(prog=NAME, description=DESCRIPTION)
+
+    parser.add_argument('-f', '--file', action='store',
+                        help='File in which to save program')
+    parser.add_argument('-v', '--version', action='store_true',
+                        help='Info about version')
+
+    return parser.parse_args()
+
+def init_workspace(file):
+    """Creates a dict (workspace) with all the info necessary"""
+    if file is None:
+        handle, file = tempfile.mkstemp(text=True)
+        os.close(handle)
+    return {FILE: file,
+            CURRENT_FUNC: 0,
+            HEADERS: ['<stdio.h>', '<stdlib.h>'],
+            MACROS: [],
+            GLOBALS: [],
+            FUNCTIONS: [['int main(int argc, char **argv)', [],],]}
+
+def main_loop(workspace):
+    """Main prompt loop"""
+    print("Welcome! Type '#help' for information")
+    while True:
+        user_input = prompt(f'{get_current_function(workspace)} {PROMPT_STD}')
+        if user_input is None:
+            print()
+            break
+        if user_input:
+            if user_input[0] == '#':
+                command, args = parse_command(user_input)
+                if command is None:
+                    print("Invalid command! Type '#help' for more information")
+                else:
+                    try:
+                        command(workspace, args)
+                    except ProgramExit:
+                        break
+            else:
+                add_to_current_func(workspace, user_input)
+    print("Goodbye!")
+
+def get_current_function(workspace):
+    """Extract current function protoype from workspace"""
+    func_i = workspace[CURRENT_FUNC]
+    return workspace[FUNCTIONS][func_i][0]
+
+def prompt(prompt_str):
+    """Draws prompt and returns user input. If EOF, return None"""
+    try:
+        return input(prompt_str)
+    except EOFError:
+        return None
+
+def add_to_current_func(workspace, user_input):
+    """Adds to current working func user_input"""
+    func_i = workspace[CURRENT_FUNC]
+    workspace[FUNCTIONS][func_i][1].append(user_input)
+
+def parse_command(user_input):
+    """Parse user_input and return corresponding handle function"""
+    function_table = {'begin': begin_command,
+                      'end': end_command,
+                      'see': None,
+                      'ed': None,
+                      'rm': None,
+                      'define': None,
+                      'include': None,
+                      'global': None,
+                      'run': None,
+                      'save': None,
+                      'help': None,  # added later with partial
+                      'quit': quit_command,}
+    function_table['help'] = functools.partial(help_command, function_table)
+    if not user_input[0] == '#':
+        return None, None
+    split_str = user_input.split(sep=' ')
+    return (function_table.get(split_str[0][1:]), split_str[1:])
+
+### COMMAND FUNCTIONS ###
+def begin_command(workspace, args):
+    """Function that handles #begin command"""
+    if not args:
+        print("Invalid #begin command")
+    elif "-h" in args:
+        print("#begin func_prototype [-h]: start adding to function with protoype"
+              "func_prototype")
+    else:
+        prototype = ' '.join(args)
+        for i, item in enumerate(workspace[FUNCTIONS]):
+            if prototype == item[0]:
+                workspace[CURRENT_FUNC] = i
+                return
+        workspace[FUNCTIONS].append([prototype, [],])
+        workspace[CURRENT_FUNC] = len(workspace[FUNCTIONS]) - 1
+
+def see_command(workspace, args):
+    """Function that handles the #see command"""
+
+def end_command(workspace, args):
+    """Function that handles #end command"""
+    if args and args[0] == '-h':
+        print("#end [-h]: End adding to current function and return to adding "
+              "to main")
+    else:
+        workspace[CURRENT_FUNC] = 0  # 0 will always be main
+
+def help_command(function_table, workspace, args):
+    """Print help dialog for each command (#help command)"""
+    if not args:
+        print("#help [command]: print help for all commands or the one specified")
+        for _, item in function_table.items():
+            if item and item != function_table['help']:
+                item(workspace, ["-h"])
+    else:
+        requested = function_table.get(args[0])
+        if requested and requested != function_table['help']:
+            requested(workspace, ['-h'])
+        elif requested == function_table['help']:
+            return
+        else:
+            print(f'Command {args[0]} not found')
+
+def quit_command(_, args):
+    """Quit @name@ (#quit command)"""
+    if args and args[0] == '-h':
+        print("#quit [-h]: quit {NAME}")
+    else:
+        raise ProgramExit()
+
+### MAIN IF ###
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
