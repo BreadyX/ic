@@ -19,6 +19,7 @@ VERSION_DIALOG = ("{} - BreadyX's utils (BXU). Version {}\n"
 
 PROMPT_STD = '>> '
 PROMPT_MOD = '*> '
+PROMPT_CON = '\> '
 
 FILE = 0
 CURRENT_FUNC = 1
@@ -53,7 +54,6 @@ class EditString:
     def clear_edit_str(cls):
         """Clear the edit string"""
         cls.set_edit_str('')
-        cls._edit_str = ''
 
 def main():
     """Main function"""
@@ -131,11 +131,11 @@ def parse_command(user_input):
     """Parse user_input and return corresponding handle function"""
     function_table = {'begin': begin_command,
                       'end': end_command,
-                      'see': None,
+                      'see': see_command,
                       'ed': None,
                       'rm': None,
-                      'define': None,
-                      'include': None,
+                      'include': include_command,
+                      'define': define_command,
                       'global': None,
                       'run': None,
                       'save': None,
@@ -164,9 +164,6 @@ def begin_command(workspace, args):
         workspace[FUNCTIONS].append([prototype, [],])
         workspace[CURRENT_FUNC] = len(workspace[FUNCTIONS]) - 1
 
-def see_command(workspace, args):
-    """Function that handles the #see command"""
-
 def end_command(workspace, args):
     """Function that handles #end command"""
     if args and args[0] == '-h':
@@ -174,6 +171,127 @@ def end_command(workspace, args):
               "to main")
     else:
         workspace[CURRENT_FUNC] = 0  # 0 will always be main
+
+def see_command(workspace, args):
+    """Function that handles the #see command"""
+    if not args:
+        args.append("-a")
+    if "-h" in args:
+        print("#see [-a|-g|-H|-m|-h] [-f func]: Print the contents of specified"
+              " object. If nothing is specified, print all.\n"
+              "\t-a       print all\n"
+              "\t-H       print all headers\n"
+              "\t-m macro print macros with name macro. If non specified print "
+              " all\n"
+              "\t-g       print all globals\n"
+              "\t-f func  print function with prototype func. If none specified"
+              " print all")
+        return
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "-a":
+            print_headers(workspace)
+            print_macros(workspace)
+            print_globals(workspace)
+            print_function(workspace, None)
+            break;
+        elif arg == "-H":
+            print_headers(workspace)
+        elif arg == "-m":
+            print_macros(workspace)
+        elif arg == "-g":
+            print_globals(workspace)
+        elif arg == "-f":
+            j, prototype = get_prototype(args[i + 1:])
+            print_function(workspace, prototype)
+            i = i + 1 + j;
+        else:
+            print(f'Invalid call to #see: option {arg} not valid')
+            break
+        i += 1;
+
+def print_headers(workspace):
+    """Print all headers inside workspace"""
+    for i, header in enumerate(workspace[HEADERS]):
+        print(f'{i} #include {header}')
+
+def print_macros(workspace):
+    """Print all macros inside workspace"""
+    print(workspace[MACROS]) # TODO
+
+def get_macro_with_name(workspace, macro_name):
+    for m in workspace[MACROS]:
+        if m[0] == macro_name:
+            return m
+    return None
+
+def print_globals(workspace):
+    """Print all globals inside workspace"""
+    for i, glob in enumerate(workspace[GLOBALS]):
+        print(f'{i} {glob}')
+
+def print_function(workspace, prototype):
+    """Print function with prototype 'prototype'. If prototype is empty or None,
+    print all functions"""
+    if not prototype:
+        for i, func in enumerate(workspace[FUNCTIONS]):
+            print(f'{i} {func[0]} '"{")
+            for line in func[1]:
+                print("\t" + line)
+            print("}")
+    else:
+        lines = None
+        for i, func in enumerate(workspace[FUNCTIONS]):
+            if func[0] == prototype:
+                lines = func[1]
+                break
+        if lines:
+            print(prototype + " {")
+            for line in lines:
+                print("\t" + line)
+            print("}")
+        else:
+            print(f'Function with prototype {prototype} doesn\'t exist')
+
+def get_prototype(prototype_loc):
+    """Extract prototype from args slice"""
+    j = 0
+    prototype = ''
+    for j, f_arg in enumerate(prototype_loc):
+        if f_arg[0] == '-':
+            j -= 1;
+            break;
+        else:
+            prototype += f_arg + ' '
+    return j, prototype.strip()
+
+def include_command(workspace, args):
+    if not args:
+        print("Invalid call to #include: at least one argument necessary")
+    elif "-h" in args:
+        print("#include <header>|\"header\" [-h]: include specified header")
+    else:
+        workspace[HEADERS].append(args[0])
+
+def define_command(workspace, args):
+    if not args:
+        print("Invalid call to #define: at least one argument necessary")
+    elif "-h" in args:
+        print("#define macro [-h]: define macro. Can be multiline by having \\"
+              " as the last char in line")
+        return
+    macro_name = args[0]
+    macro_content = ' '.join(args[1:])
+    lines = [macro_content.strip('\\').strip()]
+    old_macro = get_macro_with_name(workspace, macro_name)
+    if not old_macro:
+        workspace[MACROS].append([macro_name, ''])
+        old_macro = workspace[MACROS][len(workspace[MACROS]) - 1]  # get last macro
+    while macro_content[-1] == '\\':
+        macro_content = prompt(PROMPT_CON)
+        lines.append(macro_content.strip('\\').strip())
+    old_macro[1] = lines
 
 def help_command(function_table, workspace, args):
     """Print help dialog for each command (#help command)"""
@@ -189,12 +307,12 @@ def help_command(function_table, workspace, args):
         elif requested == function_table['help']:
             return
         else:
-            print(f'Command {args[0]} not found')
+            print(f'Invalid call to #help: command {args[0]} not found')
 
 def quit_command(_, args):
     """Quit @name@ (#quit command)"""
     if args and args[0] == '-h':
-        print("#quit [-h]: quit {NAME}")
+        print(f'#quit [-h]: quit {NAME}')
     else:
         raise ProgramExit()
 
@@ -203,4 +321,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print()
+        print("Goodbye")
