@@ -7,13 +7,17 @@ import argparse
 import tempfile
 import readline
 import functools
+import shlex
 
 NAME = "@name@"
 VERSION = "@version@"
-DEFAULT_COMPILER = '@default_compiler@'
+DEFAULT_COMPILER_CMD = '@default_compiler_cmd@'
 
 DESCRIPTION = 'A shell-like environment for quickly writing simple C programs.'
-EPILOG = f'Default compiler: {DEFAULT_COMPILER}.'
+EPILOG = ("The compiler command line uses:\n"
+          "    {0} to identify where the input file is placed\n"
+          "    {1} to identify where the output file is placed\n"
+          f'Default compiler command line: {DEFAULT_COMPILER_CMD}.')
 
 VERSION_DIALOG = ("{} version {}\n"
                   "Written by BreadyX, contacts:\n"
@@ -37,10 +41,18 @@ class ProgramExit(Exception):
 def main():
     """Main function"""
     argv = handle_argv()
-    comp = argv.compiler
     if argv.version:
         print(VERSION_DIALOG.format(NAME, VERSION))
         sys.exit(0)
+
+    comp = argv.compiler
+    try:
+        if not comp:
+            comp = DEFAULT_COMPILER_CMD
+        comp.format("", "")
+    except IndexError:
+        print(f'Invalid format {argv.compiler}')
+        sys.exit(1)
     workspace = init_workspace(comp)
     main_loop(workspace)
 
@@ -50,7 +62,7 @@ def handle_argv():
                                      epilog=EPILOG)
 
     parser.add_argument('-c', '--compiler', action='store',
-                        help='Use this compiler')
+                        help='Use this cmd as the compiler command line. ')
     parser.add_argument('-v', '--version', action='store_true',
                         help='Info about version')
 
@@ -58,14 +70,12 @@ def handle_argv():
 
 def init_workspace(compiler):
     """Creates a dict (workspace) with all the info necessary"""
-    if not compiler:
-        compiler = DEFAULT_COMPILER
     return {COMPILER: compiler,
             CURRENT_FUNC: 0,
             HEADERS: ['<stdio.h>', '<stdlib.h>'],
             MACROS: [],
             GLOBALS: [],
-            FUNCTIONS: [['int main(int argc, char **argv)', [],],]}
+            FUNCTIONS: [[MAIN_PROTOTYPE, [],],]}
 
 def main_loop(workspace):
     """Main prompt loop"""
@@ -122,7 +132,7 @@ def parse_command(user_input):
     function_table['help'] = functools.partial(help_command, function_table)
     if not user_input[0] == '#':
         return None, None
-    split_str = user_input.split(sep=' ')
+    split_str = shlex.split(user_input)
     return (function_table.get(split_str[0][1:]), split_str[1:])
 
 ### COMMAND FUNCTIONS ###
@@ -407,6 +417,9 @@ def help_command(function_table, workspace, args):
             return
         else:
             print(f'Invalid call to #help: command {args[0]} not found')
+
+def run_command(workpace, args):
+    """Handle #run command"""
 
 def quit_command(_, args):
     """Quit @name@ (#quit command)"""
