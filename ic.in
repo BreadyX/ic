@@ -115,8 +115,8 @@ def parse_command(user_input):
                       'end': end_command,
                       'see': see_command,
                       'rm': rm_command,
+                      'clear': clear_command,
                       'run': None,
-                      'clear': None,
                       'help': None,  # added later with partial
                       'quit': quit_command,}
     function_table['help'] = functools.partial(help_command, function_table)
@@ -148,7 +148,7 @@ def define_command(workspace, args):
     if not old_macro:
         workspace[MACROS].append([macro_name, ''])
         old_macro = workspace[MACROS][len(workspace[MACROS]) - 1]  # get last macro
-    while macro_content[-1] == '\\':
+    while macro_content and macro_content[-1] == '\\':
         macro_content = prompt(PROMPT_CON)
         lines.append(macro_content.strip('\\').strip())
     old_macro[1] = lines
@@ -259,6 +259,8 @@ def print_macro(workspace, macro_name):
 def print_macro_data(macro_data):
     """Print and format macro data in macro_data"""
     print(f'#define {macro_data[0]} ', end='')
+    if not macro_data[1]:
+        print()
     for i, line in enumerate(macro_data[1]):
         print(f'\t{line}', end='')
         if macro_data[1][i + 1:]:
@@ -314,7 +316,7 @@ def rm_command(workspace, args):
     if not args:
         print("Invalid call to #rm command")
         return
-    elif "-h" in args:
+    if "-h" in args:
         print("#rm -H|-g|-m|-f exp [-h]: removes argument from workspace.\n"
               "\t-H header     remove header from workspace\n"
               "\t-g global     remove global from workspace\n"
@@ -348,6 +350,46 @@ def rm_command(workspace, args):
             workspace[FUNCTIONS].remove(function)
         else:
             print(f'Invalid call to #rm: function {exp} doesn\'t exist')
+    else:
+        print(f'Invalid call to #rm: option {args[0]} not valid')
+
+def clear_command(workspace, args):
+    """Handles #clear command"""
+    if not args:
+        print("Invalid call to #rm command")
+        return
+    if "-h" in args:
+        print("#clear -H|-g|-m macro|-f function [-h]: clear contents of "
+              "element:\n"
+              "\t-H            clear all headers\n"
+              "\t-g            clear all globals\n"
+              "\t-m macro      clear macro without deleting it (equivalent to "
+              "#define macro\n"
+              "\t-f prototype  clear contents of function with prototype "
+              "without deleting said function\n"
+              "\tIf no prototype is given, clear current function")
+        return
+    exp = ' '.join(args[1:])
+    if args[0] == '-H':
+        workspace[HEADERS].clear()
+    elif args[0] == '-g':
+        workspace[GLOBALS].clear()
+    elif args[0] == '-m':
+        macro_data = find_macro_with_name(workspace, exp)
+        if macro_data:
+            macro_data[1].clear()
+        else:
+            print(f'Invalid call to #clear: macro {exp} doesn\'t exist')
+    elif args[0] == '-f':
+        if not exp:
+            exp = get_current_function(workspace)
+        function_data = find_func_with_prototype(workspace, exp)
+        if function_data:
+            function_data[1].clear()
+        else:
+            print(f'Invalid call to #clear: function {exp} doesn\'t exist')
+    else:
+        print(f'Invalid call to #clear: option {args[0]} not valid')
 
 def help_command(function_table, workspace, args):
     """Print help dialog for each command (#help command)"""
