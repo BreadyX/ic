@@ -8,6 +8,7 @@ python_install = python.find_installation('python3')
 conf_data = configuration_data()
 conf_data.set('name', meson.project_name())
 conf_data.set('version', meson.project_version())
+conf_data.set('default_compiler', 'gcc')
 ic = configure_file(input:  'ic.in',
                     output: 'ic',
                     configuration: conf_data)

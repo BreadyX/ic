@@ -21,7 +21,9 @@ PROMPT_STD = '>> '
 PROMPT_MOD = '*> '
 PROMPT_CON = '\> '
 
-FILE = 0
+DEFAULT_COMPIELR = '@default_compiler@'
+
+COMPILER = 0
 CURRENT_FUNC = 1
 HEADERS = 2
 MACROS = 3
@@ -58,30 +60,29 @@ class EditString:
 def main():
     """Main function"""
     argv = handle_argv()
-    file = argv.file
+    comp = argv.compiler
     if argv.version:
         print(VERSION_DIALOG.format(NAME, VERSION))
         sys.exit(0)
-    workspace = init_workspace(file)
+    workspace = init_workspace(comp)
     main_loop(workspace)
 
 def handle_argv():
     """Set up ArgumentParser and return the namespace obtained after parsing"""
     parser = argparse.ArgumentParser(prog=NAME, description=DESCRIPTION)
 
-    parser.add_argument('-f', '--file', action='store',
-                        help='File in which to save program')
+    parser.add_argument('-c', '--compiler', action='store',
+                        help='Use this compiler')
     parser.add_argument('-v', '--version', action='store_true',
                         help='Info about version')
 
     return parser.parse_args()
 
-def init_workspace(file):
+def init_workspace(compiler):
     """Creates a dict (workspace) with all the info necessary"""
-    if file is None:
-        handle, file = tempfile.mkstemp(text=True)
-        os.close(handle)
-    return {FILE: file,
+    if not compiler:
+        compiler = DEFAULT_COMPILER
+    return {COMPILER: compiler,
             CURRENT_FUNC: 0,
             HEADERS: ['<stdio.h>', '<stdlib.h>'],
             MACROS: [],
@@ -131,7 +132,7 @@ def parse_command(user_input):
     """Parse user_input and return corresponding handle function"""
     function_table = {'include': include_command,
                       'define': define_command,
-                      'global': None,
+                      'global': global_command,
                       'begin': begin_command,
                       'end': end_command,
                       'see': see_command,
@@ -147,6 +148,44 @@ def parse_command(user_input):
     return (function_table.get(split_str[0][1:]), split_str[1:])
 
 ### COMMAND FUNCTIONS ###
+def include_command(workspace, args):
+    if not args:
+        print("Invalid call to #include: at least one argument necessary")
+    elif "-h" in args:
+        print("#include <header>|\"header\" [-h]: include specified header")
+    else:
+        workspace[HEADERS].append(args[0])
+
+def define_command(workspace, args):
+    if not args:
+        print("Invalid call to #define: at least one argument necessary")
+    elif "-h" in args:
+        print("#define macro [-h]: define macro. Can be multiline by having \\"
+              " as the last char in line")
+        return
+    macro_name = args[0]
+    macro_content = ' '.join(args[1:])
+    lines = [macro_content.strip('\\').strip()]
+    old_macro = find_macro_with_name(workspace, macro_name)
+    if not old_macro:
+        workspace[MACROS].append([macro_name, ''])
+        old_macro = workspace[MACROS][len(workspace[MACROS]) - 1]  # get last macro
+    while macro_content[-1] == '\\':
+        macro_content = prompt(PROMPT_CON)
+        lines.append(macro_content.strip('\\').strip())
+    old_macro[1] = lines
+
+def find_macro_with_name(workspace, macro_name):
+    """Find macro data that has name macro_name"""
+    for m in workspace[MACROS]:
+        if m[0] == macro_name:
+            return m
+    return None
+
+def global_command(workspace, args):
+    """ """
+    pass
+
 def begin_command(workspace, args):
     """Function that handles #begin command"""
     if not args:
@@ -240,13 +279,6 @@ def print_macro_data(macro_data):
             print(" \\ ", end='')
         print('\n', end='')
 
-def find_macro_with_name(workspace, macro_name):
-    """Find macro data that has name macro_name"""
-    for m in workspace[MACROS]:
-        if m[0] == macro_name:
-            return m
-    return None
-
 def print_globals(workspace):
     """Print all globals inside workspace"""
     for i, glob in enumerate(workspace[GLOBALS]):
@@ -290,33 +322,6 @@ def find_func_with_prototype(workspace, prototype):
         if func == prototype:
             return func
     return None
-
-def include_command(workspace, args):
-    if not args:
-        print("Invalid call to #include: at least one argument necessary")
-    elif "-h" in args:
-        print("#include <header>|\"header\" [-h]: include specified header")
-    else:
-        workspace[HEADERS].append(args[0])
-
-def define_command(workspace, args):
-    if not args:
-        print("Invalid call to #define: at least one argument necessary")
-    elif "-h" in args:
-        print("#define macro [-h]: define macro. Can be multiline by having \\"
-              " as the last char in line")
-        return
-    macro_name = args[0]
-    macro_content = ' '.join(args[1:])
-    lines = [macro_content.strip('\\').strip()]
-    old_macro = find_macro_with_name(workspace, macro_name)
-    if not old_macro:
-        workspace[MACROS].append([macro_name, ''])
-        old_macro = workspace[MACROS][len(workspace[MACROS]) - 1]  # get last macro
-    while macro_content[-1] == '\\':
-        macro_content = prompt(PROMPT_CON)
-        lines.append(macro_content.strip('\\').strip())
-    old_macro[1] = lines
 
 def help_command(function_table, workspace, args):
     """Print help dialog for each command (#help command)"""
