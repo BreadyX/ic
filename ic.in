@@ -5,9 +5,12 @@ import sys
 import os
 import argparse
 import tempfile
-import readline
 import functools
 import shlex
+import subprocess
+
+if 'readline' in sys.modules:
+    import readline
 
 NAME = "@name@"
 VERSION = "@version@"
@@ -17,6 +20,8 @@ DESCRIPTION = 'A shell-like environment for quickly writing simple C programs.'
 EPILOG = ("The compiler command line uses:\n"
           "    {0} to identify where the input file is placed\n"
           "    {1} to identify where the output file is placed\n"
+          "Remember to force the compiler to treat input as a C file. For example:"
+          " 'gcc -x c {0} -o {1}'"
           f'Default compiler command line: {DEFAULT_COMPILER_CMD}.')
 
 VERSION_DIALOG = ("{} version {}\n"
@@ -24,7 +29,7 @@ VERSION_DIALOG = ("{} version {}\n"
                   "\tGitHub repo (BXU):  https://github.com/BreadyX/bxu")
 
 PROMPT_STD = '>> '
-PROMPT_CON = '\> '
+PROMPT_CON = '\\> '
 
 COMPILER = 0
 CURRENT_FUNC = 1
@@ -62,7 +67,7 @@ def handle_argv():
                                      epilog=EPILOG)
 
     parser.add_argument('-c', '--compiler', action='store',
-                        help='Use this cmd as the compiler command line. ')
+                        help='Use this cmd as the compiler command line')
     parser.add_argument('-v', '--version', action='store_true',
                         help='Info about version')
 
@@ -87,14 +92,17 @@ def main_loop(workspace):
             break
         if user_input:
             if user_input[0] == '#':
-                command, args = parse_command(user_input)
-                if command is None:
+                try:
+                    command, args = parse_command(user_input)
+                    command(workspace, args)
+                except ValueError as error:
+                    print(error)
+                except KeyError:
                     print("Invalid command! Type '#help' for more information")
-                else:
-                    try:
-                        command(workspace, args)
-                    except ProgramExit:
-                        break
+                except (NotImplementedError, TypeError):
+                    print("Command not yet available")
+                except ProgramExit:
+                    break
             else:
                 add_to_current_func(workspace, user_input)
     print("Goodbye!")
@@ -126,17 +134,17 @@ def parse_command(user_input):
                       'see': see_command,
                       'rm': rm_command,
                       'clear': clear_command,
-                      'run': None,
+                      'run': run_command,
+                      'cc': cc_command,
                       'help': None,  # added later with partial
                       'quit': quit_command,}
     function_table['help'] = functools.partial(help_command, function_table)
-    if not user_input[0] == '#':
-        return None, None
     split_str = shlex.split(user_input)
-    return (function_table.get(split_str[0][1:]), split_str[1:])
+    return function_table[split_str[0][1:]], split_str[1:]
 
 ### COMMAND FUNCTIONS ###
 def include_command(workspace, args):
+    """Handle #include command"""
     if not args:
         print("Invalid call to #include: at least one argument necessary")
     elif "-h" in args:
@@ -145,6 +153,7 @@ def include_command(workspace, args):
         workspace[HEADERS].append(args[0])
 
 def define_command(workspace, args):
+    """Handle #define command"""
     if not args:
         print("Invalid call to #define: at least one argument necessary")
     elif "-h" in args:
@@ -165,9 +174,9 @@ def define_command(workspace, args):
 
 def find_macro_with_name(workspace, macro_name):
     """Find macro data that has name macro_name"""
-    for m in workspace[MACROS]:
-        if m[0] == macro_name:
-            return m
+    for macro in workspace[MACROS]:
+        if macro[0] == macro_name:
+            return macro
     return None
 
 def global_command(workspace, args):
@@ -229,8 +238,8 @@ def see_command(workspace, args):
             print_macro(workspace, None)
             print_globals(workspace)
             print_function(workspace, None)
-            break;
-        elif arg == "-H":
+            break
+        if arg == "-H":
             print_headers(workspace)
         elif arg == "-m":
             if len(args) > i + 1 and args[i + 1][0] != '-':
@@ -243,7 +252,7 @@ def see_command(workspace, args):
         elif arg == "-f":
             j, prototype = get_prototype_from_argv(args[i + 1:])
             print_function(workspace, prototype)
-            i = i + 1 + j;
+            i = i + 1 + j
         else:
             print(f'Invalid call to #see: option {arg} not valid')
             break
@@ -251,35 +260,35 @@ def see_command(workspace, args):
 
 def print_headers(workspace):
     """Print all headers inside workspace"""
-    for i, header in enumerate(workspace[HEADERS]):
+    for header in workspace[HEADERS]:
         print(f'#include {header}')
 
 def print_macro(workspace, macro_name):
     """Print all macros inside workspace"""
     if not macro_name:
-        for m in workspace[MACROS]:
-            print_macro_data(m)
+        for macro in workspace[MACROS]:
+            print(format_macro_data(macro))
     else:
         macro_data = find_macro_with_name(workspace, macro_name)
         if macro_data:
-            print_macro_data(macro_data)
+            print(format_macro_data(macro_data))
         else:
             print(f'Macro with name {macro_name} doesn\'t exist')
 
-def print_macro_data(macro_data):
+def format_macro_data(macro_data):
     """Print and format macro data in macro_data"""
-    print(f'#define {macro_data[0]} ', end='')
-    if not macro_data[1]:
-        print()
+    data = ""
+    data += f'#define {macro_data[0]} '
     for i, line in enumerate(macro_data[1]):
-        print(f'\t{line}', end='')
+        data += f'\t{line}'
         if macro_data[1][i + 1:]:
-            print(" \\ ", end='')
-        print('\n', end='')
+            data += " \\ \n"
+    data += '\n'
+    return data
 
 def print_globals(workspace):
     """Print all globals inside workspace"""
-    for i, glob in enumerate(workspace[GLOBALS]):
+    for glob in workspace[GLOBALS]:
         print(f'{glob}')
 
 def get_prototype_from_argv(prototype_loc):
@@ -288,10 +297,9 @@ def get_prototype_from_argv(prototype_loc):
     prototype = ''
     for j, f_arg in enumerate(prototype_loc):
         if f_arg[0] == '-':
-            j -= 1;
-            break;
-        else:
-            prototype += f_arg + ' '
+            j -= 1
+            break
+        prototype += f_arg + ' '
     return j, prototype.strip()
 
 def print_function(workspace, prototype):
@@ -299,20 +307,22 @@ def print_function(workspace, prototype):
     print all functions"""
     if not prototype:
         for func in workspace[FUNCTIONS]:
-            print_function_data(func)
+            print(format_function_data(func))
     else:
         function_data = find_func_with_prototype(workspace, prototype)
         if function_data:
-            print_function_data(function_data)
+            print(format_function_data(function_data))
         else:
             print(f'Function with prototype {prototype} doesn\'t exist')
 
-def print_function_data(function):
+def format_function_data(function_data):
     """Print and format function data in function"""
-    print(function[0] + " {")
-    for line in function[1]:
-        print("\t" + line)
-    print("}")
+    function = ""
+    function += function_data[0] + " {\n"
+    for line in function_data[1]:
+        function += "\t" + line + "\n"
+    function += "}\n"
+    return function
 
 def find_func_with_prototype(workspace, prototype):
     """Find function data that contains prototype"""
@@ -335,33 +345,48 @@ def rm_command(workspace, args):
         return
     exp = ' '.join(args[1:])
     # Who decided switches are too stupid for python?
-    if args[0] == '-H':
-        try:
-            workspace[HEADERS].remove(exp)
-        except ValueError:
-            print(f'Invalid call to #rm: header {exp} doesn\'t exist')
-    elif args[0] == '-g':
-        try:
-            workspace[GLOBALS].remove(exp)
-        except ValueError:
-            print(f'Invalid call to #rm: global {exp} doesn\'t exist')
-    elif args[0] == '-m':
-        macro = find_macro_with_name(workspace, exp)
-        if macro:
-            workspace[MACROS].remove(macro)
-        else:
-            print(f'Invalid call to #rm: macro {exp} doesn\'t exist')
-    elif args[0] == '-f':
-        function = find_func_with_prototype(workspace, exp)
-        if function:
-            if function[0] == MAIN_PROTOTYPE:
-                print("Blocking attempt to remove main function. Please use #clear")
-                return
-            workspace[FUNCTIONS].remove(function)
-        else:
-            print(f'Invalid call to #rm: function {exp} doesn\'t exist')
-    else:
+    handlers = {'-H': rm_handle_header,
+                '-g': rm_handle_global,
+                '-m': rm_handle_macro,
+                '-f': rm_handle_function}
+    func = handlers.get(args[0])
+    if not func:
         print(f'Invalid call to #rm: option {args[0]} not valid')
+    else:
+        func(workspace, exp)
+
+def rm_handle_header(workspace, exp):
+    """Handle #rm -H"""
+    try:
+        workspace[HEADERS].remove(exp)
+    except ValueError:
+        print(f'Invalid call to #rm: header {exp} doesn\'t exist')
+
+def rm_handle_global(workspace, exp):
+    """Handle #rm -g"""
+    try:
+        workspace[GLOBALS].remove(exp)
+    except ValueError:
+        print(f'Invalid call to #rm: global {exp} doesn\'t exist')
+
+def rm_handle_macro(workspace, exp):
+    """Handle #rm -m"""
+    macro = find_macro_with_name(workspace, exp)
+    if macro:
+        workspace[MACROS].remove(macro)
+    else:
+        print(f'Invalid call to #rm: macro {exp} doesn\'t exist')
+
+def rm_handle_function(workspace, exp):
+    """Handle #rm -f"""
+    function = find_func_with_prototype(workspace, exp)
+    if function:
+        if function[0] == MAIN_PROTOTYPE:
+            print("Blocking attempt to remove main function. Please use #clear")
+            return
+        workspace[FUNCTIONS].remove(function)
+    else:
+        print(f'Invalid call to #rm: function {exp} doesn\'t exist')
 
 def clear_command(workspace, args):
     """Handles #clear command"""
@@ -401,25 +426,91 @@ def clear_command(workspace, args):
     else:
         print(f'Invalid call to #clear: option {args[0]} not valid')
 
+def cc_command(workspace, args):
+    """Handle #cc command"""
+    raise NotImplementedError
+
 def help_command(function_table, workspace, args):
     """Print help dialog for each command (#help command)"""
     if not args:
-        print("#help [command]: print help for all commands or the one specified\n")
+        print("A command starts with # . Arguments to command use shell-like "
+              "splitting and escaping.\n\n"
+              "Commands:")
         for _, item in function_table.items():
-            if item and item != function_table['help']:
+            if item:
                 item(workspace, ["-h"])
-                print()
+        print()
+    elif args[0] == '-h':
+        print("#help [command]: print help for all commands or the one specified")
     else:
         requested = function_table.get(args[0])
-        if requested and requested != function_table['help']:
+        if requested and requested:
             requested(workspace, ['-h'])
-        elif requested == function_table['help']:
-            return
         else:
             print(f'Invalid call to #help: command {args[0]} not found')
 
-def run_command(workpace, args):
+def run_command(workspace, args):
     """Handle #run command"""
+    handle, c_path = tempfile.mkstemp()
+    content = merge_workspace(workspace)
+    os.write(handle, bytes(content.encode(encoding='UTF-8')))
+    os.close(handle)
+
+    handle, out_path = tempfile.mkstemp()
+    os.close(handle)
+
+    compiler_cmd = workspace[COMPILER].format(c_path, out_path)
+
+    try:
+        subprocess.run(shlex.split(compiler_cmd), check=True)
+        subprocess.run([out_path] + args, check=True)
+    except subprocess.SubprocessError:
+        print("Error in compilation or execution of program")
+
+    try:
+        os.remove(c_path)
+        os.remove(out_path)
+    except FileNotFoundError:
+        pass
+
+def merge_workspace(workspace):
+    """Merge workspace data into a single compilable C string"""
+    headers = merge_headers(workspace[HEADERS])
+    define = merge_macros(workspace[MACROS])
+    globs = merge_globals(workspace[GLOBALS])
+    prototypes, functions = merge_functions(workspace[FUNCTIONS])
+
+    return f'{headers}\n{define}\n{globs}\n{prototypes}\n{functions}\n'
+
+def merge_headers(header_data):
+    """Merge header_data into a single compilable C string"""
+    headers = ""
+    for header in header_data:
+        headers += f'#include {header}\n'
+    return headers
+
+def merge_macros(macro_data):
+    """Merge macro_data into a single compilable C string"""
+    macros = ""
+    for macro in macro_data:
+        macros += format_macro_data(macro)
+    return macros
+
+def merge_globals(global_data):
+    """Merge global_data into a single compilable C string"""
+    globs = ""
+    for glob in global_data:
+        globs += f'{glob}\n'
+    return globs
+
+def merge_functions(function_data):
+    """Merge function_data into a single compilable C string"""
+    prototypes = ""
+    functions = ""
+    for func in function_data:
+        prototypes += func[0] + ";\n"
+        functions += format_function_data(func)
+    return prototypes, functions
 
 def quit_command(_, args):
     """Quit @name@ (#quit command)"""
@@ -433,4 +524,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("Goodbye")
+        print("\nGoodbye!")
