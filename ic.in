@@ -10,18 +10,17 @@ import functools
 
 NAME = "@name@"
 VERSION = "@version@"
+DEFAULT_COMPILER = '@default_compiler@'
 
-DESCRIPTION = ''
+DESCRIPTION = 'A shell-like environment for quickly writing simple C programs.'
+EPILOG = f'Default compiler: {DEFAULT_COMPILER}.'
 
-VERSION_DIALOG = ("{} - BreadyX's utils (BXU). Version {}\n"
-                  "Written by BreadyX, contacts (for bug reports and other):\n"
+VERSION_DIALOG = ("{} version {}\n"
+                  "Written by BreadyX, contacts:\n"
                   "\tGitHub repo (BXU):  https://github.com/BreadyX/bxu")
 
 PROMPT_STD = '>> '
-PROMPT_MOD = '*> '
 PROMPT_CON = '\> '
-
-DEFAULT_COMPIELR = '@default_compiler@'
 
 COMPILER = 0
 CURRENT_FUNC = 1
@@ -30,32 +29,10 @@ MACROS = 3
 GLOBALS = 4
 FUNCTIONS = 5
 
+MAIN_PROTOTYPE = "int main(int argc, char **argv)"
+
 class ProgramExit(Exception):
     """Exception that signals a #quit command"""
-
-class EditString:
-    """(Static) Handle inline string editing"""
-    _edit_str = ''
-
-    @classmethod
-    def has_edit_str(cls):
-        """Return True if has edit string, else false"""
-        return bool(cls._edit_str)
-
-    @classmethod
-    def set_edit_str(cls, edit_string):
-        """Sets the string that will be edited by the user to `edit_string`"""
-        def pre_input_hook():
-            readline.insert_text(cls._edit_str)
-            readline.redisplay()
-
-        cls._edit_str = edit_string
-        readline.set_pre_input_hook(pre_input_hook)
-
-    @classmethod
-    def clear_edit_str(cls):
-        """Clear the edit string"""
-        cls.set_edit_str('')
 
 def main():
     """Main function"""
@@ -69,7 +46,8 @@ def main():
 
 def handle_argv():
     """Set up ArgumentParser and return the namespace obtained after parsing"""
-    parser = argparse.ArgumentParser(prog=NAME, description=DESCRIPTION)
+    parser = argparse.ArgumentParser(prog=NAME, description=DESCRIPTION,
+                                     epilog=EPILOG)
 
     parser.add_argument('-c', '--compiler', action='store',
                         help='Use this compiler')
@@ -136,7 +114,7 @@ def parse_command(user_input):
                       'begin': begin_command,
                       'end': end_command,
                       'see': see_command,
-                      'rm': None,
+                      'rm': rm_command,
                       'run': None,
                       'clear': None,
                       'help': None,  # added later with partial
@@ -183,13 +161,21 @@ def find_macro_with_name(workspace, macro_name):
     return None
 
 def global_command(workspace, args):
-    """ """
-    pass
+    """Function that handles the #global command"""
+    if not args:
+        print("Invalid call to #global command")
+    elif args[0] == '-h':
+        print("#global statement [-h]: add statement to the list of global "
+              "statements.")
+    else:
+        statement = ' '.join(args)
+        if not statement in workspace[GLOBALS]:
+            workspace[GLOBALS].append(statement)
 
 def begin_command(workspace, args):
     """Function that handles #begin command"""
     if not args:
-        print("Invalid #begin command")
+        print("Invalid call to #begin command")
     elif "-h" in args:
         print("#begin func_prototype [-h]: start adding to function with protoype"
               "func_prototype")
@@ -246,7 +232,7 @@ def see_command(workspace, args):
             print_globals(workspace)
         elif arg == "-f":
             j, prototype = get_prototype_from_argv(args[i + 1:])
-            print_functions(workspace, prototype)
+            print_function(workspace, prototype)
             i = i + 1 + j;
         else:
             print(f'Invalid call to #see: option {arg} not valid')
@@ -274,7 +260,7 @@ def print_macro_data(macro_data):
     """Print and format macro data in macro_data"""
     print(f'#define {macro_data[0]} ', end='')
     for i, line in enumerate(macro_data[1]):
-        print(f'\tline', end='')
+        print(f'\t{line}', end='')
         if macro_data[1][i + 1:]:
             print(" \\ ", end='')
         print('\n', end='')
@@ -304,7 +290,7 @@ def print_function(workspace, prototype):
             print_function_data(func)
     else:
         function_data = find_func_with_prototype(workspace, prototype)
-        if func:
+        if function_data:
             print_function_data(function_data)
         else:
             print(f'Function with prototype {prototype} doesn\'t exist')
@@ -319,17 +305,58 @@ def print_function_data(function):
 def find_func_with_prototype(workspace, prototype):
     """Find function data that contains prototype"""
     for func in workspace[FUNCTIONS]:
-        if func == prototype:
+        if func[0] == prototype:
             return func
     return None
+
+def rm_command(workspace, args):
+    """Function that handles the #rm command"""
+    if not args:
+        print("Invalid call to #rm command")
+        return
+    elif "-h" in args:
+        print("#rm -H|-g|-m|-f exp [-h]: removes argument from workspace.\n"
+              "\t-H header     remove header from workspace\n"
+              "\t-g global     remove global from workspace\n"
+              "\t-m macro      remove macro from workspace\n"
+              "\t-f prototype  remove header from workspace\n")
+        return
+    exp = ' '.join(args[1:])
+    # Who decided switches are too stupid for python?
+    if args[0] == '-H':
+        try:
+            workspace[HEADERS].remove(exp)
+        except ValueError:
+            print(f'Invalid call to #rm: header {exp} doesn\'t exist')
+    elif args[0] == '-g':
+        try:
+            workspace[GLOBALS].remove(exp)
+        except ValueError:
+            print(f'Invalid call to #rm: global {exp} doesn\'t exist')
+    elif args[0] == '-m':
+        macro = find_macro_with_name(workspace, exp)
+        if macro:
+            workspace[MACROS].remove(macro)
+        else:
+            print(f'Invalid call to #rm: macro {exp} doesn\'t exist')
+    elif args[0] == '-f':
+        function = find_func_with_prototype(workspace, exp)
+        if function:
+            if function[0] == MAIN_PROTOTYPE:
+                print("Blocking attempt to remove main function. Please use #clear")
+                return
+            workspace[FUNCTIONS].remove(function)
+        else:
+            print(f'Invalid call to #rm: function {exp} doesn\'t exist')
 
 def help_command(function_table, workspace, args):
     """Print help dialog for each command (#help command)"""
     if not args:
-        print("#help [command]: print help for all commands or the one specified")
+        print("#help [command]: print help for all commands or the one specified\n")
         for _, item in function_table.items():
             if item and item != function_table['help']:
                 item(workspace, ["-h"])
+                print()
     else:
         requested = function_table.get(args[0])
         if requested and requested != function_table['help']:
