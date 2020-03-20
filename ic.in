@@ -9,8 +9,10 @@ import functools
 import shlex
 import subprocess
 
-if 'readline' in sys.modules:
+try:
     import readline
+except ImportError:
+    print("Module readline not found")
 
 NAME = "@name@"
 VERSION = "@version@"
@@ -391,7 +393,7 @@ def rm_handle_function(workspace, exp):
 def clear_command(workspace, args):
     """Handles #clear command"""
     if not args:
-        print("Invalid call to #rm command")
+        print("Invalid call to #clear command")
         return
     if "-h" in args:
         print("#clear -H|-g|-m macro|-f function [-h]: clear contents of "
